@@ -1,0 +1,74 @@
+# Environment
+.env
+*.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+.python-version
+
+# Testing & Databases
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+*.xml
+*.db
+*.sqlite
+*.sqlite3
+test.db
+sentinelai.db
+test_sentinel.db
+
+# Type checking
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# Node
+node_modules/
+dist/
+.pnp
+.pnp.js
+
+# Frontend build
+frontend/dist/
+frontend/.vite/
+
+# Uploads (never commit user data)
+backend/uploads/
+uploads/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker/
+
+# Logs
+*.log
+logs/
+
+# Alembic (keep versions, ignore pycache)
+alembic/__pycache__/
+
+# OS
+.DS_Store
+desktop.ini
