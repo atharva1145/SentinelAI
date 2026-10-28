@@ -22,10 +22,34 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadSuccess, onNavig
   const [file, setFile] = useState<File | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [loadingDemo, setLoadingDemo] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [uploadedDataset, setUploadedDataset] = useState<Dataset | null>(null);
   const [profile, setProfile] = useState<DatasetProfile | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleLoadDemo = async () => {
+    setLoadingDemo(true);
+    setError(null);
+    try {
+      const dataset = await apiClient.loadDemoDataset();
+      setUploadedDataset(dataset);
+      if (dataset.profile) {
+        setProfile(dataset.profile);
+      } else if (dataset.profile_json) {
+        try {
+          setProfile(JSON.parse(dataset.profile_json));
+        } catch {
+          // ignore
+        }
+      }
+      onUploadSuccess(dataset);
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Failed to load demo dataset');
+    } finally {
+      setLoadingDemo(false);
+    }
+  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -108,7 +132,40 @@ export const UploadPage: React.FC<UploadPageProps> = ({ onUploadSuccess, onNavig
 
       {/* Upload Box */}
       {!uploadedDataset ? (
-        <div className="space-y-4">
+        <div className="space-y-5">
+          {/* 1-Click Demo Loader */}
+          <div className="p-5 rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-xl bg-indigo-100 text-indigo-700 shrink-0 mt-0.5">
+                <Sparkles className="h-5 w-5" />
+              </div>
+              <div>
+                <p className="font-bold text-indigo-950 text-sm">Want to test the platform instantly?</p>
+                <p className="mt-0.5 text-indigo-800">
+                  Load the synthetic benchmark dataset (2,010 transactions with injected outliers, missing amounts, negative prices, and velocity spikes) with 1 click.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={handleLoadDemo}
+              disabled={loadingDemo || uploading}
+              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white font-semibold rounded-xl shadow-sm transition flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+            >
+              {loadingDemo ? (
+                <>
+                  <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                  Loading Demo Data...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="h-4 w-4" />
+                  Load Demo Dataset (1-Click)
+                </>
+              )}
+            </button>
+          </div>
+
           <div
             onDragOver={handleDragOver}
             onDragLeave={handleDragLeave}

@@ -14,7 +14,9 @@ import {
   ChevronRight,
   Filter,
   BarChart2,
+  BarChart,
   RefreshCw,
+  TrendingDown,
 } from 'lucide-react';
 import { apiClient } from '../api/client';
 import type { Dataset, DatasetProfile, ColumnProfile, Issue, AnomalyResult } from '../types';
@@ -37,9 +39,12 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
   const [issues, setIssues] = useState<Issue[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyResult[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'profile' | 'preview' | 'issues' | 'anomalies'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'preview' | 'issues' | 'anomalies' | 'drift'>('profile');
   const [validating, setValidating] = useState(false);
   const [detecting, setDetecting] = useState(false);
+  const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('isolation_forest');
+  const [driftReport, setDriftReport] = useState<any>(null);
+  const [loadingDrift, setLoadingDrift] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const fetchDatasetDetails = async () => {
@@ -71,6 +76,18 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
     }
   };
 
+  const fetchDrift = async () => {
+    setLoadingDrift(true);
+    try {
+      const report = await apiClient.getDatasetDrift(datasetId);
+      setDriftReport(report);
+    } catch (err) {
+      console.error('Failed to load drift report', err);
+    } finally {
+      setLoadingDrift(false);
+    }
+  };
+
   useEffect(() => {
     fetchDatasetDetails();
   }, [datasetId]);
@@ -94,10 +111,16 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
     setDetecting(true);
     setActionMessage(null);
     try {
-      const res = await apiClient.detectAnomalies(datasetId);
+      const res = await apiClient.detectAnomalies(datasetId, selectedAlgorithm, 0.05);
+      const algoLabels: Record<string, string> = {
+        isolation_forest: 'Isolation Forest',
+        local_outlier_factor: 'Local Outlier Factor (LOF)',
+        one_class_svm: 'One-Class SVM',
+        ensemble: 'Ensemble Suite (IF + LOF)',
+      };
       setActionMessage({
         type: 'success',
-        text: `Isolation Forest ML detection complete! ${res.anomalies_detected} anomalous records flagged.`,
+        text: `${algoLabels[selectedAlgorithm] || selectedAlgorithm} ML detection complete! ${res.anomalies_detected} anomalous records flagged.`,
       });
       await fetchDatasetDetails();
       onRefreshStats();
@@ -182,7 +205,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons */}
+          {/* Action Buttons with Model Selector */}
           <div className="flex flex-wrap items-center gap-2">
             <button
               onClick={handleRunValidation}
@@ -202,23 +225,36 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
               )}
             </button>
 
-            <button
-              onClick={handleRunAnomalyDetection}
-              disabled={detecting}
-              className="px-3.5 py-2 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-medium text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
-            >
-              {detecting ? (
-                <>
-                  <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Training Isolation Forest...
-                </>
-              ) : (
-                <>
-                  <BrainCircuit className="h-3.5 w-3.5" />
-                  Detect ML Anomalies
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-xl border border-slate-200">
+              <select
+                value={selectedAlgorithm}
+                onChange={(e) => setSelectedAlgorithm(e.target.value)}
+                className="text-xs font-semibold bg-transparent text-slate-700 px-2.5 py-1 focus:outline-none cursor-pointer"
+              >
+                <option value="isolation_forest">Isolation Forest (Default)</option>
+                <option value="local_outlier_factor">Local Outlier Factor (LOF)</option>
+                <option value="one_class_svm">One-Class SVM</option>
+                <option value="ensemble">Ensemble (IF + LOF)</option>
+              </select>
+
+              <button
+                onClick={handleRunAnomalyDetection}
+                disabled={detecting}
+                className="px-3 py-1.5 bg-violet-600 hover:bg-violet-700 disabled:bg-violet-400 text-white font-medium text-xs rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                {detecting ? (
+                  <>
+                    <div className="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Detecting...
+                  </>
+                ) : (
+                  <>
+                    <BrainCircuit className="h-3.5 w-3.5" />
+                    Detect ML
+                  </>
+                )}
+              </button>
+            </div>
 
             <a
               href={apiClient.getReportDownloadUrl(dataset.id)}
@@ -302,6 +338,20 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
           <BrainCircuit className="h-4 w-4" />
           ML Anomalies ({anomalies.filter((a) => a.is_anomaly).length})
         </button>
+        <button
+          onClick={() => {
+            setActiveTab('drift');
+            fetchDrift();
+          }}
+          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer ${
+            activeTab === 'drift'
+              ? 'border-b-2 border-indigo-600 text-indigo-600'
+              : 'text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <TrendingDown className="h-4 w-4" />
+          Distribution Drift (KS-Test)
+        </button>
       </div>
 
       {/* Tab 1: Column Profiling Breakdown */}
@@ -337,7 +387,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
                   )}
                 </div>
 
-                {/* Progress Bar for Missing Values */}
+                {/* Progress Bar for Completeness */}
                 <div className="space-y-1">
                   <div className="flex justify-between text-[11px] text-slate-400">
                     <span>Completeness</span>
@@ -511,14 +561,14 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
         </div>
       )}
 
-      {/* Tab 4: ML Anomalies */}
+      {/* Tab 4: ML Anomalies with TreeSHAP and z-scores */}
       {activeTab === 'anomalies' && (
         <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-100 flex items-center justify-between">
             <div>
-              <h3 className="text-xs font-bold text-slate-900">Isolation Forest ML Detections</h3>
+              <h3 className="text-xs font-bold text-slate-900">Machine Learning Anomaly Detections</h3>
               <p className="text-[11px] text-slate-500">
-                Unsupervised anomaly scoring with feature z-score explanations
+                Isolation Forest and multi-model scoring with empirical z-scores and TreeSHAP marginal contributions
               </p>
             </div>
             <button
@@ -531,7 +581,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
 
           {anomalies.length === 0 ? (
             <div className="p-8 text-center text-xs text-slate-400">
-              No anomaly detection jobs run yet. Click &quot;Detect ML Anomalies&quot; to evaluate this dataset.
+              No anomaly detection jobs run yet. Click &quot;Detect ML&quot; to evaluate this dataset.
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -541,7 +591,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
                     <th className="py-3 px-4">Row</th>
                     <th className="py-3 px-4">Anomaly Score</th>
                     <th className="py-3 px-4">Prediction</th>
-                    <th className="py-3 px-4">Feature Deviations (|z-score| &gt; 2)</th>
+                    <th className="py-3 px-4">Feature Deviations (|z-score| &gt; 1.5)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -549,7 +599,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
                     .filter((a) => a.is_anomaly)
                     .slice(0, 30)
                     .map((item) => {
-                      let contribs: Record<string, number> = {};
+                      let contribs: Record<string, any> = {};
                       if (item.feature_contributions_json) {
                         try {
                           contribs = JSON.parse(item.feature_contributions_json);
@@ -574,13 +624,13 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
                           <td className="py-3 px-4">
                             <div className="flex flex-wrap gap-1.5">
                               {Object.entries(contribs)
-                                .filter(([_, z]) => Math.abs(z) >= 1.5)
+                                .filter(([k, z]) => k !== '_shap' && typeof z === 'number' && Math.abs(z) >= 1.5)
                                 .map(([col, z]) => (
                                   <span
                                     key={col}
                                     className="px-2 py-0.5 rounded text-[10px] font-mono bg-slate-100 text-slate-700 border border-slate-200"
                                   >
-                                    {col}: <strong className={z > 0 ? 'text-red-600' : 'text-blue-600'}>z={z.toFixed(2)}</strong>
+                                    {col}: <strong className={Number(z) > 0 ? 'text-red-600' : 'text-blue-600'}>z={Number(z).toFixed(2)}</strong>
                                   </span>
                                 ))}
                             </div>
@@ -590,6 +640,106 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
                     })}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab 5: Data Drift Analysis (Kolmogorov-Smirnov Test) */}
+      {activeTab === 'drift' && (
+        <div className="bg-white rounded-xl border border-slate-200/80 p-6 shadow-sm space-y-6">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
+            <div>
+              <h3 className="text-base font-bold text-slate-900">Kolmogorov-Smirnov Distribution Drift Analysis</h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Two-sample KS-test evaluating empirical cumulative distribution shift against baseline dataset.
+              </p>
+            </div>
+            <button
+              onClick={fetchDrift}
+              disabled={loadingDrift}
+              className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-semibold rounded-lg flex items-center gap-1.5 cursor-pointer"
+            >
+              <RefreshCw className={`h-3.5 w-3.5 ${loadingDrift ? 'animate-spin' : ''}`} />
+              Re-evaluate Drift
+            </button>
+          </div>
+
+          {loadingDrift ? (
+            <div className="p-12 text-center text-xs text-slate-500">
+              <div className="h-6 w-6 animate-spin rounded-full border-2 border-indigo-600 border-t-transparent mx-auto mb-2" />
+              Evaluating empirical cumulative distributions...
+            </div>
+          ) : !driftReport ? (
+            <div className="p-8 text-center text-xs text-slate-400">
+              No drift data available. Click Re-evaluate above.
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {/* Drift Status Banner */}
+              <div className={`p-4 rounded-xl border flex items-center justify-between ${
+                driftReport.has_drift
+                  ? 'bg-amber-50 border-amber-200 text-amber-900'
+                  : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <div className={`p-2 rounded-xl ${driftReport.has_drift ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                    <AlertTriangle className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm">
+                      {driftReport.has_drift ? 'Statistically Significant Drift Detected' : 'Distributions Stable (No Drift Detected)'}
+                    </h4>
+                    <p className="text-xs opacity-90">
+                      {driftReport.drifted_features_count} of {driftReport.total_features_evaluated} features drifted ({(driftReport.drift_share * 100).toFixed(1)}% drift share) compared to baseline: <strong>{driftReport.baseline_filename}</strong>
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Drift Table */}
+              <div className="overflow-x-auto border border-slate-200 rounded-xl">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase text-[10px]">
+                    <tr>
+                      <th className="py-3 px-4">Feature Name</th>
+                      <th className="py-3 px-4">KS-Statistic (D)</th>
+                      <th className="py-3 px-4">p-value</th>
+                      <th className="py-3 px-4">Wasserstein Distance</th>
+                      <th className="py-3 px-4">Current vs Baseline Mean</th>
+                      <th className="py-3 px-4">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {driftReport.features?.map((f: any) => (
+                      <tr key={f.column} className="hover:bg-slate-50/70">
+                        <td className="py-3 px-4 font-bold text-slate-900">{f.column}</td>
+                        <td className="py-3 px-4 font-mono text-slate-700">{f.ks_statistic.toFixed(4)}</td>
+                        <td className="py-3 px-4 font-mono">
+                          <span className={f.p_value < 0.05 ? 'text-red-600 font-bold' : 'text-slate-600'}>
+                            {f.p_value < 0.0001 ? '< 0.0001' : f.p_value.toFixed(4)}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4 font-mono text-slate-700">{f.wasserstein_distance.toFixed(4)}</td>
+                        <td className="py-3 px-4 font-mono text-slate-600">
+                          {f.current_mean} vs {f.baseline_mean}
+                        </td>
+                        <td className="py-3 px-4">
+                          {f.is_drifted ? (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                              DRIFT DETECTED
+                            </span>
+                          ) : (
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              STABLE
+                            </span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
         </div>

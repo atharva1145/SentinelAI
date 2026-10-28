@@ -36,6 +36,11 @@ export const apiClient = {
     return res.data;
   },
 
+  async loadDemoDataset(): Promise<Dataset> {
+    const res = await api.post<Dataset>('/api/datasets/demo');
+    return res.data;
+  },
+
   async getDatasets(page = 1, pageSize = 20): Promise<PaginatedResponse<Dataset>> {
     const res = await api.get<PaginatedResponse<Dataset>>('/api/datasets', {
       params: { page, page_size: pageSize },
@@ -53,8 +58,42 @@ export const apiClient = {
     return res.data;
   },
 
-  async detectAnomalies(id: number): Promise<{ job_id: number; status: string; anomalies_detected: number; message: string }> {
-    const res = await api.post(`/api/datasets/${id}/detect-anomalies`);
+  async detectAnomalies(
+    id: number,
+    algorithm: string = 'isolation_forest',
+    contamination: number = 0.05
+  ): Promise<{ job_id: number; status: string; anomalies_detected: number; message: string; algorithm?: string }> {
+    const res = await api.post(`/api/datasets/${id}/detect-anomalies`, null, {
+      params: { algorithm, contamination },
+    });
+    return res.data;
+  },
+
+  async getDatasetDrift(
+    id: number,
+    baselineId?: number
+  ): Promise<{
+    has_drift: boolean;
+    drift_share: number;
+    drifted_features_count: number;
+    total_features_evaluated: number;
+    current_dataset_id: number;
+    current_filename: string;
+    baseline_dataset_id: number;
+    baseline_filename: string;
+    features: Array<{
+      column: string;
+      ks_statistic: number;
+      p_value: number;
+      wasserstein_distance: number;
+      current_mean: number;
+      baseline_mean: number;
+      is_drifted: boolean;
+    }>;
+  }> {
+    const res = await api.get(`/api/datasets/${id}/drift`, {
+      params: baselineId ? { baseline_id: baselineId } : undefined,
+    });
     return res.data;
   },
 

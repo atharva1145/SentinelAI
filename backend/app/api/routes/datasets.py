@@ -104,6 +104,40 @@ async def upload_dataset(
 
 
 # ---------------------------------------------------------------------------
+# Load Demo Dataset (1-Click)
+# ---------------------------------------------------------------------------
+
+@router.post("/datasets/demo", response_model=DatasetRead, status_code=201)
+async def load_demo_dataset(db: Session = Depends(get_db)) -> DatasetRead:
+    """Load the built-in synthetic transaction demo dataset with 1 click."""
+    from pathlib import Path
+    from fastapi import HTTPException
+
+    # Search for the synthetic transactions file
+    candidate_paths = [
+        Path(__file__).resolve().parents[4] / "data" / "synthetic" / "transactions.csv",
+        Path("data/synthetic/transactions.csv"),
+        Path("../data/synthetic/transactions.csv"),
+    ]
+    demo_file = None
+    for p in candidate_paths:
+        if p.exists():
+            demo_file = p
+            break
+
+    if not demo_file:
+        raise HTTPException(status_code=404, detail="Synthetic demo dataset not found on server.")
+
+    with open(demo_file, "rb") as f:
+        content = f.read()
+
+    dataset: Dataset = await run_in_threadpool(
+        save_upload, content, "demo_transactions.csv", db
+    )
+    return _build_dataset_read(dataset)
+
+
+# ---------------------------------------------------------------------------
 # List datasets
 # ---------------------------------------------------------------------------
 
@@ -130,6 +164,47 @@ def list_datasets(
         page_size=page_size,
         pages=math.ceil(total / page_size) if total else 0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Data Distribution Drift Detection
+# ---------------------------------------------------------------------------
+
+@router.get("/datasets/{dataset_id}/drift")
+async def get_dataset_drift(
+    dataset_id: int,
+    baseline_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Evaluate statistical distribution drift using two-sample Kolmogorov-Smirnov tests."""
+    from app.services.drift_service import compute_dataset_drift
+
+    current_dataset = _dataset_or_404(dataset_id, db)
+
+    if baseline_id is not None:
+        baseline_dataset = _dataset_or_404(baseline_id, db)
+    else:
+        # Compare against the earliest dataset
+        baseline_dataset = (
+            db.query(Dataset)
+            .filter(Dataset.id != dataset_id)
+            .order_by(Dataset.uploaded_at.asc())
+            .first()
+        )
+        if not baseline_dataset:
+            baseline_dataset = current_dataset
+
+    report = await run_in_threadpool(
+        compute_dataset_drift,
+        current_dataset.file_path,
+        baseline_dataset.file_path,
+    )
+    report["dataset_id"] = current_dataset.id
+    report["current_dataset_id"] = current_dataset.id
+    report["current_filename"] = current_dataset.original_filename
+    report["baseline_dataset_id"] = baseline_dataset.id
+    report["baseline_filename"] = baseline_dataset.original_filename
+    return report
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +294,11 @@ async def run_validation(
 @router.post("/datasets/{dataset_id}/detect-anomalies")
 async def run_anomaly_detection(
     dataset_id: int,
+    algorithm: str = Query(default="isolation_forest"),
+    contamination: float = Query(default=0.05, ge=0.01, le=0.50),
     db: Session = Depends(get_db),
 ) -> dict:
-    """Trigger IsolationForest anomaly detection for a dataset."""
+    """Trigger anomaly detection suite (IsolationForest, LOF, OneClassSVM, Ensemble)."""
     dataset = _dataset_or_404(dataset_id, db)
 
     job = ProcessingJob(
@@ -239,7 +316,7 @@ async def run_anomaly_detection(
 
     try:
         results = await run_in_threadpool(
-            detect_anomalies, dataset.file_path, dataset_id, job.id
+            detect_anomalies, dataset.file_path, dataset_id, job.id, algorithm, contamination
         )
 
         anomaly_count = 0
@@ -301,6 +378,8 @@ async def run_anomaly_detection(
         return {
             "job_id": job.id,
             "status": "completed",
+            "algorithm": algorithm,
+            "contamination": contamination,
             "total_rows": len(results),
             "anomaly_count": anomaly_count,
             "anomalies_detected": anomaly_count,
@@ -432,3 +511,44 @@ def list_anomalies(
         page_size=page_size,
         pages=math.ceil(total / page_size) if total else 0,
     )
+
+
+# ---------------------------------------------------------------------------
+# Data Distribution Drift Detection
+# ---------------------------------------------------------------------------
+
+@router.get("/datasets/{dataset_id}/drift")
+async def get_dataset_drift(
+    dataset_id: int,
+    baseline_id: Optional[int] = Query(default=None),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Evaluate statistical distribution drift using two-sample Kolmogorov-Smirnov tests."""
+    from app.services.drift_service import compute_dataset_drift
+
+    current_dataset = _dataset_or_404(dataset_id, db)
+
+    if baseline_id is not None:
+        baseline_dataset = _dataset_or_404(baseline_id, db)
+    else:
+        # Compare against the earliest dataset
+        baseline_dataset = (
+            db.query(Dataset)
+            .filter(Dataset.id != dataset_id)
+            .order_by(Dataset.uploaded_at.asc())
+            .first()
+        )
+        if not baseline_dataset:
+            baseline_dataset = current_dataset
+
+    report = await run_in_threadpool(
+        compute_dataset_drift,
+        current_dataset.file_path,
+        baseline_dataset.file_path,
+    )
+    report["dataset_id"] = current_dataset.id
+    report["current_dataset_id"] = current_dataset.id
+    report["current_filename"] = current_dataset.original_filename
+    report["baseline_dataset_id"] = baseline_dataset.id
+    report["baseline_filename"] = baseline_dataset.original_filename
+    return report
