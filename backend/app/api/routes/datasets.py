@@ -29,7 +29,11 @@ from app.schemas.dataset import DatasetRead, DatasetListItem, DatasetProfile
 from app.schemas.issue import IssueRead, AnomalyResultRead
 from app.services.dataset_service import save_upload
 from app.services.validation_service import validate_dataset
-from app.services.report_service import generate_report_csv
+from app.services.report_service import (
+    generate_report_csv,
+    generate_clean_dataset_csv,
+    generate_quarantine_dataset_csv,
+)
 from app.ml.anomaly_detector import detect_anomalies
 
 router = APIRouter()
@@ -463,6 +467,36 @@ def download_report(dataset_id: int, db: Session = Depends(get_db)) -> Streaming
         io.StringIO(csv_content),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="report_{dataset_id}.csv"'},
+    )
+
+
+@router.get("/datasets/{dataset_id}/export-clean")
+def download_clean_dataset(dataset_id: int, db: Session = Depends(get_db)) -> StreamingResponse:
+    """Return only verified clean records, stripping high/critical issues and ML anomalies."""
+    dataset = _dataset_or_404(dataset_id, db)
+    clean_csv = generate_clean_dataset_csv(dataset_id, dataset.file_path, db)
+
+    import io
+    filename = f"clean_{dataset.original_filename}"
+    return StreamingResponse(
+        io.StringIO(clean_csv),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/datasets/{dataset_id}/export-quarantine")
+def download_quarantine_dataset(dataset_id: int, db: Session = Depends(get_db)) -> StreamingResponse:
+    """Return quarantined records with reason codes for investigation."""
+    dataset = _dataset_or_404(dataset_id, db)
+    quarantine_csv = generate_quarantine_dataset_csv(dataset_id, dataset.file_path, db)
+
+    import io
+    filename = f"quarantine_{dataset.original_filename}"
+    return StreamingResponse(
+        io.StringIO(quarantine_csv),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

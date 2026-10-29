@@ -22,6 +22,9 @@ export interface ColumnProfile {
   min_length?: number | null;
   max_length?: number | null;
   avg_length?: number | null;
+  // Distributions
+  histogram?: { bin: string; count: number }[];
+  top_categories?: { value: string; count: number; pct: number }[];
 }
 
 export interface DatasetProfile {
@@ -29,6 +32,9 @@ export interface DatasetProfile {
   column_count: number;
   duplicate_row_count: number;
   memory_usage_bytes: number;
+  quality_score?: number | null;
+  completeness_score?: number | null;
+  uniqueness_score?: number | null;
   columns: ColumnProfile[];
   preview_rows: Record<string, any>[];
 }

@@ -129,6 +129,16 @@ export const apiClient = {
     return `${base}/api/datasets/${datasetId}/report`;
   },
 
+  getCleanDownloadUrl(datasetId: number): string {
+    const base = API_BASE_URL || window.location.origin;
+    return `${base}/api/datasets/${datasetId}/export-clean`;
+  },
+
+  getQuarantineDownloadUrl(datasetId: number): string {
+    const base = API_BASE_URL || window.location.origin;
+    return `${base}/api/datasets/${datasetId}/export-quarantine`;
+  },
+
   // Issues
   async getIssue(id: number): Promise<Issue> {
     const res = await api.get<Issue>(`/api/issues/${id}`);

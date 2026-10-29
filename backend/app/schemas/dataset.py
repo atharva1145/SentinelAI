@@ -31,6 +31,9 @@ class ColumnProfile(BaseModel):
     min_length: Optional[int] = None
     max_length: Optional[int] = None
     avg_length: Optional[float] = None
+    # Distributions
+    histogram: List[Dict[str, Any]] = Field(default_factory=list)
+    top_categories: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class DatasetProfile(BaseModel):
@@ -42,6 +45,9 @@ class DatasetProfile(BaseModel):
     column_count: int
     duplicate_row_count: int
     memory_usage_bytes: int
+    quality_score: Optional[float] = None
+    completeness_score: Optional[float] = None
+    uniqueness_score: Optional[float] = None
     columns: List[ColumnProfile]
     preview: List[Dict[str, Any]] = Field(default_factory=list)
 

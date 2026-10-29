@@ -57,6 +57,20 @@ def profile_dataset(file_path: str) -> Dict[str, Any]:
                     "q75": _safe_float(non_null.quantile(0.75)) if len(non_null) else None,
                 }
             )
+            if len(non_null) >= 5:
+                try:
+                    counts, bin_edges = np.histogram(non_null.to_numpy(dtype=float), bins=5)
+                    col_info["histogram"] = [
+                        {
+                            "bin": f"{bin_edges[i]:.1f}-{bin_edges[i+1]:.1f}",
+                            "count": int(counts[i]),
+                        }
+                        for i in range(len(counts))
+                    ]
+                except Exception:
+                    col_info["histogram"] = []
+            else:
+                col_info["histogram"] = []
         else:
             str_lengths = non_null.astype(str).str.len()
             col_info.update(
@@ -66,6 +80,11 @@ def profile_dataset(file_path: str) -> Dict[str, Any]:
                     "avg_length": round(float(str_lengths.mean()), 4) if len(str_lengths) else None,
                 }
             )
+            top_vals = non_null.value_counts().head(5)
+            col_info["top_categories"] = [
+                {"value": str(k)[:20], "count": int(v), "pct": round(int(v) / max(1, row_count) * 100, 1)}
+                for k, v in top_vals.items()
+            ]
 
         columns.append(col_info)
 
@@ -74,11 +93,20 @@ def profile_dataset(file_path: str) -> Dict[str, Any]:
         for row in df.head(100).to_dict(orient="records")
     ]
 
+    total_cells = row_count * column_count if (row_count and column_count) else 1
+    total_nulls = sum(c["null_count"] for c in columns)
+    completeness_score = max(0.0, min(100.0, round((1.0 - total_nulls / total_cells) * 100, 1)))
+    uniqueness_score = max(0.0, min(100.0, round((1.0 - duplicate_row_count / max(1, row_count)) * 100, 1)))
+    quality_score = round(0.6 * completeness_score + 0.4 * uniqueness_score, 1)
+
     result = {
         "row_count": row_count,
         "column_count": column_count,
         "duplicate_row_count": duplicate_row_count,
         "memory_usage_bytes": memory_usage_bytes,
+        "quality_score": quality_score,
+        "completeness_score": completeness_score,
+        "uniqueness_score": uniqueness_score,
         "columns": columns,
         "preview": preview,
     }

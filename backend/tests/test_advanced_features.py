@@ -87,3 +87,42 @@ class TestAdvancedFeatures:
             assert "p_value" in feat
             assert "wasserstein_distance" in feat
             assert "is_drifted" in feat
+
+    def test_export_clean_and_quarantine_datasets(self, client: TestClient):
+        """Test clean ETL export and quarantined anomalies export."""
+        demo_resp = client.post("/api/datasets/demo")
+        dataset_id = demo_resp.json()["id"]
+
+        # Validate dataset to produce issues
+        client.post(f"/api/datasets/{dataset_id}/validate")
+        # Run anomaly detection
+        client.post(f"/api/datasets/{dataset_id}/detect-anomalies?algorithm=isolation_forest")
+
+        # Test Clean Export
+        clean_resp = client.get(f"/api/datasets/{dataset_id}/export-clean")
+        assert clean_resp.status_code == 200
+        assert "text/csv" in clean_resp.headers.get("content-type", "")
+        clean_text = clean_resp.text
+        assert len(clean_text.splitlines()) > 1
+
+        # Test Quarantine Export
+        quarantine_resp = client.get(f"/api/datasets/{dataset_id}/export-quarantine")
+        assert quarantine_resp.status_code == 200
+        assert "text/csv" in quarantine_resp.headers.get("content-type", "")
+        quarantine_text = quarantine_resp.text
+        assert "quarantine_reason" in quarantine_text
+
+    def test_profile_quality_score_and_histograms(self, client: TestClient):
+        """Test dataset quality score and histogram distributions in profile."""
+        demo_resp = client.post("/api/datasets/demo")
+        data = demo_resp.json()
+        assert "profile" in data
+        profile = data["profile"]
+        assert "quality_score" in profile
+        assert 0 <= profile["quality_score"] <= 100
+        assert "completeness_score" in profile
+        assert "uniqueness_score" in profile
+
+        # Check column histogram / top_categories
+        has_histogram = any("histogram" in col for col in profile["columns"])
+        assert has_histogram
