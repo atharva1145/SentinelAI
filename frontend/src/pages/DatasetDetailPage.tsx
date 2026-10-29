@@ -357,7 +357,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
       {/* Tab 1: Column Profiling Breakdown */}
       {activeTab === 'profile' && profile && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {profile.columns.map((col) => {
+          {(profile.columns || []).map((col) => {
             const isNumeric = col.mean !== undefined && col.mean !== null;
             const hasNulls = col.null_count > 0;
 
@@ -471,7 +471,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
               <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
                 <tr className="text-slate-600 font-semibold text-[11px]">
                   <th className="py-2.5 px-4 font-mono text-slate-400">#</th>
-                  {profile.columns.map((col) => (
+                  {(profile.columns || []).map((col) => (
                     <th key={col.name} className="py-2.5 px-4 whitespace-nowrap">
                       {col.name}
                     </th>
@@ -482,7 +482,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
                 {(profile.preview || profile.preview_rows || []).map((row, idx) => (
                   <tr key={idx} className="hover:bg-slate-50/80">
                     <td className="py-2 px-4 text-slate-400">{idx + 1}</td>
-                    {profile.columns.map((col) => {
+                    {(profile.columns || []).map((col) => {
                       const val = row[col.name];
                       const isNull = val === null || val === undefined || val === '';
                       return (

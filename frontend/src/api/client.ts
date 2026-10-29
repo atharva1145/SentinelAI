@@ -160,7 +160,10 @@ export const apiClient = {
   },
 
   async getDashboardTrends(): Promise<TrendPoint[]> {
-    const res = await api.get<TrendPoint[]>('/api/dashboard/trends');
-    return res.data;
+    const res = await api.get<{ issues_by_day?: TrendPoint[] } | TrendPoint[]>('/api/dashboard/trends');
+    if (res.data && typeof res.data === 'object' && 'issues_by_day' in res.data && Array.isArray((res.data as any).issues_by_day)) {
+      return (res.data as any).issues_by_day;
+    }
+    return Array.isArray(res.data) ? res.data : [];
   },
 };

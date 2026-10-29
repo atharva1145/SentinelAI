@@ -60,16 +60,16 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
     );
   }
 
-  const severityData = stats?.severity_distribution?.map((item) => ({
-    name: item.severity.charAt(0).toUpperCase() + item.severity.slice(1),
+  const severityData = (stats?.severity_distribution || []).map((item) => ({
+    name: item.severity ? (item.severity.charAt(0).toUpperCase() + item.severity.slice(1)) : 'Unknown',
     severity: item.severity,
     count: item.count,
-    color: SEVERITY_COLORS[item.severity.toLowerCase()] || '#94a3b8',
-  })) || [];
+    color: SEVERITY_COLORS[(item.severity || '').toLowerCase()] || '#94a3b8',
+  }));
 
-  const trendData = trends.map((t) => ({
-    date: t.day.slice(5), // MM-DD
-    issues: t.count,
+  const trendData = (Array.isArray(trends) ? trends : []).map((t) => ({
+    date: t?.day ? t.day.slice(5) : '', // MM-DD
+    issues: t?.count ?? 0,
   }));
 
   const totalIssues = stats?.total_issues ?? 0;
@@ -273,7 +273,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {stats.recent_datasets.map((dataset) => (
+                {(stats?.recent_datasets || []).map((dataset) => (
                   <tr key={dataset.id} className="hover:bg-slate-50/70 transition-colors">
                     <td className="py-3 px-5 text-slate-900 font-semibold flex items-center gap-2">
                       <FileSpreadsheet className="h-4 w-4 text-indigo-600 shrink-0" />
