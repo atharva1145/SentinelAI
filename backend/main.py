@@ -9,7 +9,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.core.config import settings
 from app.core.logging import setup_logging
-from app.api.routes import health, datasets, issues, dashboard
+from app.api.routes import health, datasets, issues, dashboard, custom_rules
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -32,6 +32,7 @@ async def lifespan(app: FastAPI):
     import app.models.dataset  # noqa: F401
     import app.models.issue  # noqa: F401
     import app.models.audit  # noqa: F401
+    import app.models.custom_rule  # noqa: F401
     Base.metadata.create_all(bind=engine)
     yield
     logger.info("SentinelAI shutting down")
@@ -84,3 +85,4 @@ app.include_router(health.router, tags=["health"])
 app.include_router(datasets.router, prefix="/api", tags=["datasets"])
 app.include_router(issues.router, prefix="/api", tags=["issues"])
 app.include_router(dashboard.router, prefix="/api", tags=["dashboard"])
+app.include_router(custom_rules.router, prefix="/api", tags=["custom_rules"])

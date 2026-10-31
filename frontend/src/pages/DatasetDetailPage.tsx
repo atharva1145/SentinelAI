@@ -20,11 +20,17 @@ import {
   Sparkles,
   ShieldCheck,
   X,
+  Wrench,
+  Printer,
+  Sliders,
 } from 'lucide-react';
 import { apiClient } from '../api/client';
-import type { Dataset, DatasetProfile, ColumnProfile, Issue, AnomalyResult } from '../types';
+import type { Dataset, DatasetProfile, ColumnProfile, Issue, AnomalyResult, HealthScoreData } from '../types';
 import { SeverityBadge } from '../components/SeverityBadge';
 import { StatusBadge } from '../components/StatusBadge';
+import { HealthScoreCard } from '../components/HealthScoreCard';
+import { AutoRemediationModal } from '../components/AutoRemediationModal';
+import { CustomRulesManager } from '../components/CustomRulesManager';
 
 interface DatasetDetailPageProps {
   datasetId: number;
@@ -42,7 +48,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
   const [issues, setIssues] = useState<Issue[]>([]);
   const [anomalies, setAnomalies] = useState<AnomalyResult[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'profile' | 'preview' | 'issues' | 'anomalies' | 'drift'>('profile');
+  const [activeTab, setActiveTab] = useState<'profile' | 'preview' | 'issues' | 'anomalies' | 'drift' | 'custom_rules'>('profile');
   const [validating, setValidating] = useState(false);
   const [detecting, setDetecting] = useState(false);
   const [selectedAlgorithm, setSelectedAlgorithm] = useState<string>('isolation_forest');
@@ -50,6 +56,9 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
   const [loadingDrift, setLoadingDrift] = useState(false);
   const [actionMessage, setActionMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [selectedShapAnomaly, setSelectedShapAnomaly] = useState<AnomalyResult | null>(null);
+  const [healthScore, setHealthScore] = useState<HealthScoreData | null>(null);
+  const [isRemediationOpen, setIsRemediationOpen] = useState(false);
+  const [selectedCellIssue, setSelectedCellIssue] = useState<{ issue: Issue; rowIdx: number; colName: string } | null>(null);
 
   const fetchDatasetDetails = async () => {
     setLoading(true);
@@ -64,6 +73,14 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
         } catch {
           // ignore
         }
+      }
+
+      // Fetch health score
+      try {
+        const hs = await apiClient.getDatasetHealthScore(datasetId);
+        setHealthScore(hs);
+      } catch (e) {
+        console.error('Failed to load health score', e);
       }
 
       // Fetch issues
@@ -275,6 +292,24 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
               </button>
             </div>
 
+            <button
+              onClick={() => setIsRemediationOpen(true)}
+              className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:brightness-110 text-white font-semibold text-xs rounded-xl shadow-md shadow-indigo-500/20 transition flex items-center gap-1.5 cursor-pointer"
+              title="Launch autonomous data repair & remediation studio"
+            >
+              <Wrench className="h-3.5 w-3.5 text-indigo-200" />
+              <span>Auto-Remediate</span>
+            </button>
+
+            <button
+              onClick={() => window.open(apiClient.getAuditCertificateUrl(dataset.id), '_blank')}
+              className="px-3.5 py-2 bg-slate-900 hover:bg-slate-800 text-white font-medium text-xs rounded-xl shadow-sm transition flex items-center gap-1.5 cursor-pointer"
+              title="Generate printable executive compliance audit certificate"
+            >
+              <Printer className="h-3.5 w-3.5 text-cyan-400" />
+              <span>Audit Certificate</span>
+            </button>
+
             <a
               href={apiClient.getCleanDownloadUrl(dataset.id)}
               download={`clean_${dataset.original_filename}`}
@@ -381,11 +416,17 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
         </div>
       </div>
 
+      {/* Feature 1: Enterprise Quality Health Scorecard */}
+      <HealthScoreCard
+        scoreData={healthScore}
+        onViewCertificate={() => window.open(apiClient.getAuditCertificateUrl(dataset.id), '_blank')}
+      />
+
       {/* Tabs Navigation */}
-      <div className="flex border-b border-slate-200 gap-6 text-xs font-semibold">
+      <div className="flex border-b border-slate-200 gap-6 text-xs font-semibold overflow-x-auto">
         <button
           onClick={() => setActiveTab('profile')}
-          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer ${
+          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer whitespace-nowrap ${
             activeTab === 'profile'
               ? 'border-b-2 border-indigo-600 text-indigo-600'
               : 'text-slate-500 hover:text-slate-900'
@@ -396,18 +437,18 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
         </button>
         <button
           onClick={() => setActiveTab('preview')}
-          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer ${
+          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer whitespace-nowrap ${
             activeTab === 'preview'
               ? 'border-b-2 border-indigo-600 text-indigo-600'
               : 'text-slate-500 hover:text-slate-900'
           }`}
         >
           <Layers className="h-4 w-4" />
-          Data Preview ({(profile?.preview || profile?.preview_rows || []).length} rows)
+          Data Inspector ({(profile?.preview || profile?.preview_rows || []).length} rows)
         </button>
         <button
           onClick={() => setActiveTab('issues')}
-          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer ${
+          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer whitespace-nowrap ${
             activeTab === 'issues'
               ? 'border-b-2 border-indigo-600 text-indigo-600'
               : 'text-slate-500 hover:text-slate-900'
@@ -418,7 +459,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
         </button>
         <button
           onClick={() => setActiveTab('anomalies')}
-          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer ${
+          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer whitespace-nowrap ${
             activeTab === 'anomalies'
               ? 'border-b-2 border-indigo-600 text-indigo-600'
               : 'text-slate-500 hover:text-slate-900'
@@ -432,7 +473,7 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
             setActiveTab('drift');
             fetchDrift();
           }}
-          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer ${
+          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer whitespace-nowrap ${
             activeTab === 'drift'
               ? 'border-b-2 border-indigo-600 text-indigo-600'
               : 'text-slate-500 hover:text-slate-900'
@@ -440,6 +481,17 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
         >
           <TrendingDown className="h-4 w-4" />
           Distribution Drift (KS-Test)
+        </button>
+        <button
+          onClick={() => setActiveTab('custom_rules')}
+          className={`pb-3 transition-colors flex items-center gap-2 cursor-pointer whitespace-nowrap ${
+            activeTab === 'custom_rules'
+              ? 'border-b-2 border-indigo-600 text-indigo-600'
+              : 'text-slate-500 hover:text-slate-900'
+          }`}
+        >
+          <Sliders className="h-4 w-4" />
+          Custom Business Rules
         </button>
       </div>
 
@@ -584,48 +636,146 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
         </div>
       )}
 
-      {/* Tab 2: Interactive Data Preview */}
-      {activeTab === 'preview' && profile && (
-        <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-100 flex items-center justify-between text-xs">
-            <span className="text-slate-500 font-medium">
-              Showing first {(profile.preview || profile.preview_rows || []).length} rows of original dataset
-            </span>
-            <span className="text-slate-400">Original structure preserved without modifications</span>
-          </div>
+      {/* Tab 2: Interactive Data Preview & Cell-Level Issue Inspector */}
+      {activeTab === 'preview' && profile && (() => {
+        const cellIssueMap = new Map<string, Issue>();
+        issues.forEach((iss) => {
+          if (iss.row_index !== null && iss.row_index !== undefined && iss.column_name) {
+            const key = `${iss.row_index}:${iss.column_name}`;
+            if (!cellIssueMap.has(key)) cellIssueMap.set(key, iss);
+          }
+        });
+        const rowAnomalySet = new Set<number>();
+        anomalies.filter((a) => a.is_anomaly).forEach((a) => rowAnomalySet.add(a.row_index));
 
-          <div className="overflow-x-auto max-h-[500px]">
-            <table className="w-full text-left border-collapse text-xs">
-              <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
-                <tr className="text-slate-600 font-semibold text-[11px]">
-                  <th className="py-2.5 px-4 font-mono text-slate-400">#</th>
-                  {(profile.columns || []).map((col) => (
-                    <th key={col.name} className="py-2.5 px-4 whitespace-nowrap">
-                      {col.name}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
-                {(profile.preview || profile.preview_rows || []).map((row, idx) => (
-                  <tr key={idx} className="hover:bg-slate-50/80">
-                    <td className="py-2 px-4 text-slate-400">{idx + 1}</td>
-                    {(profile.columns || []).map((col) => {
-                      const val = row[col.name];
-                      const isNull = val === null || val === undefined || val === '';
-                      return (
-                        <td key={col.name} className="py-2 px-4 whitespace-nowrap text-slate-800">
-                          {isNull ? <span className="text-slate-300 italic">null</span> : String(val)}
-                        </td>
-                      );
-                    })}
+        return (
+          <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm overflow-hidden space-y-4">
+            <div className="p-4 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div>
+                <span className="text-slate-800 font-bold">
+                  Data Grid Inspector (Showing first {(profile.preview || profile.preview_rows || []).length} rows)
+                </span>
+                <span className="block text-slate-500 text-[11px] mt-0.5">
+                  Click on any highlighted cell with a colored indicator to inspect the underlying rule violation.
+                </span>
+              </div>
+
+              {/* Inspector Legend */}
+              <div className="flex items-center gap-3 text-[11px]">
+                <span className="flex items-center gap-1.5 text-rose-700 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-rose-500" />
+                  Critical/High Issue
+                </span>
+                <span className="flex items-center gap-1.5 text-amber-700 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-amber-500" />
+                  Warning Issue
+                </span>
+                <span className="flex items-center gap-1.5 text-purple-700 font-medium">
+                  <span className="w-2 h-2 rounded-full bg-purple-500" />
+                  ML Anomaly Record
+                </span>
+              </div>
+            </div>
+
+            {/* Active Cell Inspector Drawer */}
+            {selectedCellIssue && (
+              <div className="mx-4 p-4 rounded-xl border border-rose-200 bg-rose-50/90 flex items-start justify-between text-xs animate-in fade-in">
+                <div className="space-y-1.5 flex-1 mr-4">
+                  <div className="flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+                    <span className="font-bold text-slate-900">
+                      Cell Violation: Row #{selectedCellIssue.rowIdx + 1}, Column '{selectedCellIssue.colName}'
+                    </span>
+                    <SeverityBadge severity={selectedCellIssue.issue.severity} />
+                  </div>
+                  <div className="text-slate-700"><strong>Rule Violated:</strong> {selectedCellIssue.issue.rule_name}</div>
+                  <div className="text-slate-700"><strong>Explanation:</strong> {selectedCellIssue.issue.explanation}</div>
+                  <div className="text-slate-700 font-mono text-[11px]"><strong>Expected Condition:</strong> {selectedCellIssue.issue.expected_condition}</div>
+                  <div className="text-indigo-700 font-semibold"><strong>Suggested Action:</strong> {selectedCellIssue.issue.suggested_action}</div>
+                </div>
+                <button
+                  onClick={() => setSelectedCellIssue(null)}
+                  className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-rose-100 transition cursor-pointer"
+                  title="Close inspector"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            )}
+
+            <div className="overflow-x-auto max-h-[500px]">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead className="sticky top-0 bg-slate-50 border-b border-slate-200 z-10">
+                  <tr className="text-slate-600 font-semibold text-[11px]">
+                    <th className="py-2.5 px-4 font-mono text-slate-400">#</th>
+                    {(profile.columns || []).map((col) => (
+                      <th key={col.name} className="py-2.5 px-4 whitespace-nowrap font-mono">
+                        {col.name}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className="divide-y divide-slate-100 font-mono text-[11px]">
+                  {(profile.preview || profile.preview_rows || []).map((row, idx) => {
+                    const isRowAnomaly = rowAnomalySet.has(idx);
+                    return (
+                      <tr key={idx} className={`hover:bg-slate-50/80 transition ${isRowAnomaly ? 'bg-purple-50/30' : ''}`}>
+                        <td className="py-2 px-4 text-slate-400">
+                          <span className="flex items-center gap-1">
+                            {idx + 1}
+                            {isRowAnomaly && (
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-500" title="Flagged as ML Anomaly row" />
+                            )}
+                          </span>
+                        </td>
+                        {(profile.columns || []).map((col) => {
+                          const val = row[col.name];
+                          const isNull = val === null || val === undefined || val === '';
+                          const issue = cellIssueMap.get(`${idx}:${col.name}`);
+
+                          let cellClasses = 'py-2 px-4 whitespace-nowrap text-slate-800 transition';
+                          if (issue) {
+                            cellClasses += ' cursor-pointer ';
+                            if (issue.severity === 'critical' || issue.severity === 'high') {
+                              cellClasses += 'bg-rose-50/90 text-rose-900 border-l-2 border-rose-500 font-bold hover:bg-rose-100';
+                            } else {
+                              cellClasses += 'bg-amber-50/80 text-amber-900 border-l-2 border-amber-400 font-semibold hover:bg-amber-100';
+                            }
+                          }
+
+                          return (
+                            <td
+                              key={col.name}
+                              className={cellClasses}
+                              onClick={() => {
+                                if (issue) {
+                                  setSelectedCellIssue({ issue, rowIdx: idx, colName: col.name });
+                                }
+                              }}
+                              title={issue ? `⚠️ [${issue.severity.toUpperCase()}] ${issue.rule_name}: ${issue.explanation} (Click to inspect)` : undefined}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                {issue && (
+                                  <span
+                                    className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                                      issue.severity === 'critical' ? 'bg-rose-500 animate-pulse' : 'bg-amber-500'
+                                    }`}
+                                  />
+                                )}
+                                <span>{isNull ? <span className="text-slate-300 italic">null</span> : String(val)}</span>
+                              </div>
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Tab 3: Dataset Issues */}
       {activeTab === 'issues' && (
@@ -995,6 +1145,33 @@ export const DatasetDetailPage: React.FC<DatasetDetailPageProps> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {/* Feature 2: Custom Rules Studio Tab */}
+      {activeTab === 'custom_rules' && (
+        <CustomRulesManager
+          datasetId={datasetId}
+          availableColumns={(profile?.columns || []).map((c) => c.name)}
+          onRulesChanged={() => {
+            handleRunValidation();
+            onRefreshStats();
+          }}
+        />
+      )}
+
+      {/* Feature 1: Autonomous Remediation Modal */}
+      {dataset && (
+        <AutoRemediationModal
+          datasetId={datasetId}
+          filename={dataset.original_filename}
+          isOpen={isRemediationOpen}
+          onClose={() => setIsRemediationOpen(false)}
+          onSuccess={(newId) => {
+            fetchDatasetDetails();
+            onRefreshStats();
+            if (newId) onNavigate('dataset-detail', newId);
+          }}
+        />
       )}
     </div>
   );

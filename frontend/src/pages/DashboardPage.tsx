@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   FileSpreadsheet,
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   CheckCircle2,
   AlertOctagon,
   Calendar,
+  Sparkles,
 } from 'lucide-react';
 import {
   BarChart,
@@ -28,6 +29,7 @@ import {
 import type { DashboardStats, TrendPoint, Dataset } from '../types';
 import { StatCard } from '../components/StatCard';
 import { SeverityBadge } from '../components/SeverityBadge';
+import { apiClient } from '../api/client';
 
 interface DashboardPageProps {
   stats: DashboardStats | null;
@@ -49,6 +51,20 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   loading,
   onNavigate,
 }) => {
+  const [demoLoading, setDemoLoading] = useState(false);
+
+  const handleLoadDemo = async () => {
+    setDemoLoading(true);
+    try {
+      const ds = await apiClient.loadDemoDataset();
+      onNavigate('dataset-detail', ds.id);
+    } catch (e) {
+      console.error('Failed to load demo dataset', e);
+    } finally {
+      setDemoLoading(false);
+    }
+  };
+
   if (loading && !stats) {
     return (
       <div className="p-8 flex items-center justify-center min-h-[400px]">
@@ -95,6 +111,15 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             </p>
           </div>
           <div className="flex items-center gap-3 shrink-0">
+            <button
+              onClick={handleLoadDemo}
+              disabled={demoLoading}
+              className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-medium rounded-xl text-xs shadow transition flex items-center gap-2 cursor-pointer"
+              title="Instantly inject pre-configured benchmark financial dataset with known injected anomalies"
+            >
+              <Sparkles className="h-3.5 w-3.5 text-amber-400" />
+              <span>{demoLoading ? 'Loading Benchmark...' : 'Load Demo Dataset'}</span>
+            </button>
             <button
               onClick={() => onNavigate('upload')}
               className="px-4 py-2.5 bg-indigo-500 hover:bg-indigo-600 text-white font-medium rounded-xl text-xs shadow transition flex items-center gap-2 cursor-pointer"

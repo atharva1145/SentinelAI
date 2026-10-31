@@ -140,3 +140,78 @@ export interface PaginatedResponse<T> {
   page_size: number;
   pages: number;
 }
+
+export interface HealthScoreData {
+  dataset_id: number;
+  filename: string;
+  overall_score: number;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  status_label: string;
+  color: string;
+  dimensions: {
+    completeness: number;
+    validity: number;
+    uniqueness: number;
+    anomaly_free: number;
+  };
+  metrics: {
+    total_rows: number;
+    total_columns: number;
+    total_issues: number;
+    critical_issues: number;
+    high_issues: number;
+    total_anomalies: number;
+    duplicate_rows: number;
+    total_null_cells: number;
+  };
+}
+
+export interface RemediationSummary {
+  initial_rows: number;
+  final_rows: number;
+  initial_columns: number;
+  final_columns: number;
+  duplicates_removed: number;
+  imputed_cells: number;
+  rows_dropped_missing: number;
+  clamped_values: number;
+  standardized_dates: number;
+  trimmed_cells: number;
+  total_repairs: number;
+  audit_log: Array<{
+    action: string;
+    column?: string;
+    affected_count: number;
+    description: string;
+  }>;
+}
+
+export interface RemediationPreview {
+  dataset_id: number;
+  filename: string;
+  summary: RemediationSummary;
+  sample_before: Record<string, any>[];
+  sample_after: Record<string, any>[];
+}
+
+export interface CustomRule {
+  id: number;
+  name: string;
+  column_name: string;
+  rule_type: 'between' | 'in_set' | 'regex' | 'not_null' | 'min_length' | 'max_length';
+  parameters_json: string;
+  severity: Severity;
+  is_active: boolean;
+  dataset_id: number | null;
+  created_at: string;
+}
+
+export interface CustomRuleCreate {
+  name: string;
+  column_name: string;
+  rule_type: string;
+  parameters_json: string;
+  severity: string;
+  is_active: boolean;
+  dataset_id?: number | null;
+}

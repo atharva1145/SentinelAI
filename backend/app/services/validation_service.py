@@ -21,6 +21,7 @@ def validate_dataset(
     dataset_id: int,
     job_id: int,
     profile: Dict[str, Any],
+    custom_rules: Optional[List[Any]] = None,
 ) -> List[Issue]:
     """Run all rule-based checks and return a (possibly truncated) list of Issue objects.
 
@@ -38,6 +39,7 @@ def validate_dataset(
     _check_negative_values(df, dataset_id, job_id, issues)
     _check_out_of_range(df, dataset_id, job_id, issues)
     _check_category_consistency(df, dataset_id, job_id, issues)
+    _check_custom_rules(df, dataset_id, job_id, custom_rules, issues)
 
     if len(issues) > MAX_ISSUES:
         logger.warning(
@@ -68,13 +70,14 @@ def _make_issue(
     severity: str,
     explanation: str,
     suggested_action: str,
+    detector: str = "rule_based",
 ) -> Issue:
     return Issue(
         dataset_id=dataset_id,
         job_id=job_id,
         row_index=row_index,
         column_name=column_name,
-        detector="rule_based",
+        detector=detector,
         rule_name=rule_name,
         actual_value=actual_value,
         expected_condition=expected_condition,
@@ -313,3 +316,140 @@ def _check_category_consistency(
                 )
                 if len(issues) >= MAX_ISSUES:
                     return
+
+
+def _check_custom_rules(
+    df: pd.DataFrame,
+    dataset_id: int,
+    job_id: int,
+    custom_rules: Optional[List[Any]],
+    issues: List[Issue],
+) -> None:
+    """Evaluates user-configured custom business rules on the dataset."""
+    if not custom_rules:
+        return
+    import json
+
+    for rule in custom_rules:
+        if not getattr(rule, "is_active", True):
+            continue
+
+        col = getattr(rule, "column_name", "")
+        if not col or col not in df.columns:
+            continue
+
+        rtype = getattr(rule, "rule_type", "")
+        params_raw = getattr(rule, "parameters_json", "{}")
+        params: Dict[str, Any] = {}
+        try:
+            params = json.loads(params_raw) if isinstance(params_raw, str) else (params_raw or {})
+        except Exception:
+            params = {}
+
+        sev = getattr(rule, "severity", "high")
+        rule_title = f"CustomRule:{getattr(rule, 'name', 'Rule')}"
+
+        if rtype == "not_null":
+            null_mask = df[col].isna()
+            for idx in df[null_mask].index:
+                issues.append(
+                    _make_issue(
+                        dataset_id=dataset_id,
+                        job_id=job_id,
+                        row_index=int(idx),
+                        column_name=col,
+                        rule_name=rule_title,
+                        actual_value="null",
+                        expected_condition=f"Field '{col}' must not be null/empty",
+                        severity=sev,
+                        explanation=f"Custom rule failed: mandatory column '{col}' is missing a value.",
+                        suggested_action=f"Provide a value or impute '{col}'.",
+                        detector="custom_rule",
+                    )
+                )
+                if len(issues) >= MAX_ISSUES:
+                    return
+
+        elif rtype == "between":
+            min_val = params.get("min")
+            max_val = params.get("max")
+            num_series = pd.to_numeric(df[col], errors="coerce")
+            cond = pd.Series(True, index=df.index)
+            if min_val is not None:
+                cond = cond & (num_series >= float(min_val))
+            if max_val is not None:
+                cond = cond & (num_series <= float(max_val))
+
+            fail_mask = ~cond & df[col].notna()
+            for idx in df[fail_mask].index:
+                actual = str(df.loc[idx, col])
+                issues.append(
+                    _make_issue(
+                        dataset_id=dataset_id,
+                        job_id=job_id,
+                        row_index=int(idx),
+                        column_name=col,
+                        rule_name=rule_title,
+                        actual_value=actual,
+                        expected_condition=f"Value must be between {min_val} and {max_val}",
+                        severity=sev,
+                        explanation=f"Custom rule violated: '{actual}' is out of configured bounds [{min_val}, {max_val}].",
+                        suggested_action=f"Verify transaction amount or clamp to range [{min_val}, {max_val}].",
+                        detector="custom_rule",
+                    )
+                )
+                if len(issues) >= MAX_ISSUES:
+                    return
+
+        elif rtype == "in_set":
+            allowed = [str(x).strip().lower() for x in params.get("allowed", []) if str(x).strip()]
+            if allowed:
+                str_series = df[col].astype(str).str.strip().str.lower()
+                fail_mask = ~str_series.isin(allowed) & df[col].notna()
+                for idx in df[fail_mask].index:
+                    actual = str(df.loc[idx, col])
+                    issues.append(
+                        _make_issue(
+                            dataset_id=dataset_id,
+                            job_id=job_id,
+                            row_index=int(idx),
+                            column_name=col,
+                            rule_name=rule_title,
+                            actual_value=actual,
+                            expected_condition=f"Value must be in {allowed}",
+                            severity=sev,
+                            explanation=f"Custom rule violated: '{actual}' is not an authorized category.",
+                            suggested_action=f"Standardize to one of the approved categories: {', '.join(allowed)}.",
+                            detector="custom_rule",
+                        )
+                    )
+                    if len(issues) >= MAX_ISSUES:
+                        return
+
+        elif rtype == "regex":
+            pat = params.get("pattern", ".*")
+            try:
+                rx = re.compile(pat)
+                for idx, val in df[col].dropna().items():
+                    if not rx.search(str(val)):
+                        actual = str(val)
+                        issues.append(
+                            _make_issue(
+                                dataset_id=dataset_id,
+                                job_id=job_id,
+                                row_index=int(idx),
+                                column_name=col,
+                                rule_name=rule_title,
+                                actual_value=actual,
+                                expected_condition=f"Must match regex pattern '{pat}'",
+                                severity=sev,
+                                explanation=f"Custom rule violated: '{actual}' does not match regex pattern '{pat}'.",
+                                suggested_action="Format value to adhere to required pattern specification.",
+                                detector="custom_rule",
+                            )
+                        )
+                        if len(issues) >= MAX_ISSUES:
+                            return
+            except Exception:
+                pass
+

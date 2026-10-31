@@ -8,6 +8,11 @@ import type {
   DashboardStats,
   TrendPoint,
   PaginatedResponse,
+  HealthScoreData,
+  RemediationSummary,
+  RemediationPreview,
+  CustomRule,
+  CustomRuleCreate,
 } from '../types';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -175,5 +180,64 @@ export const apiClient = {
       return (res.data as any).issues_by_day;
     }
     return Array.isArray(res.data) ? res.data : [];
+  },
+
+  // Health Score
+  async getDatasetHealthScore(id: number): Promise<HealthScoreData> {
+    const res = await api.get<HealthScoreData>(`/api/datasets/${id}/health-score`);
+    return res.data;
+  },
+
+  // Auto-Remediation
+  async previewRemediation(id: number, config?: any): Promise<RemediationPreview> {
+    const res = await api.post<RemediationPreview>(`/api/datasets/${id}/remediate/preview`, config || {});
+    return res.data;
+  },
+
+  async applyRemediation(id: number, config?: any, saveAsNew = true): Promise<{
+    success: boolean;
+    original_dataset_id: number;
+    new_dataset_id: number | null;
+    repaired_filename: string;
+    summary: RemediationSummary;
+    download_url: string;
+  }> {
+    const res = await api.post(`/api/datasets/${id}/remediate`, config || {}, {
+      params: { save_as_new_dataset: saveAsNew },
+    });
+    return res.data;
+  },
+
+  getRemediatedDownloadUrl(id: number, config?: any): string {
+    const cfgStr = config ? `?config=${encodeURIComponent(JSON.stringify(config))}` : '';
+    return `/api/datasets/${id}/remediate/download${cfgStr}`;
+  },
+
+  // Audit Certificate URL
+  getAuditCertificateUrl(id: number): string {
+    return `/api/datasets/${id}/audit-certificate`;
+  },
+
+  // Custom Rules
+  async getCustomRules(datasetId?: number): Promise<CustomRule[]> {
+    const res = await api.get<CustomRule[]>('/api/custom-rules', {
+      params: datasetId ? { dataset_id: datasetId } : undefined,
+    });
+    return res.data;
+  },
+
+  async createCustomRule(rule: CustomRuleCreate): Promise<CustomRule> {
+    const res = await api.post<CustomRule>('/api/custom-rules', rule);
+    return res.data;
+  },
+
+  async deleteCustomRule(ruleId: number): Promise<{ success: boolean; deleted_id: number }> {
+    const res = await api.delete(`/api/custom-rules/${ruleId}`);
+    return res.data;
+  },
+
+  async updateCustomRule(ruleId: number, update: Partial<CustomRule>): Promise<CustomRule> {
+    const res = await api.patch<CustomRule>(`/api/custom-rules/${ruleId}`, update);
+    return res.data;
   },
 };

@@ -171,47 +171,6 @@ def list_datasets(
 
 
 # ---------------------------------------------------------------------------
-# Data Distribution Drift Detection
-# ---------------------------------------------------------------------------
-
-@router.get("/datasets/{dataset_id}/drift")
-async def get_dataset_drift(
-    dataset_id: int,
-    baseline_id: Optional[int] = Query(default=None),
-    db: Session = Depends(get_db),
-) -> dict:
-    """Evaluate statistical distribution drift using two-sample Kolmogorov-Smirnov tests."""
-    from app.services.drift_service import compute_dataset_drift
-
-    current_dataset = _dataset_or_404(dataset_id, db)
-
-    if baseline_id is not None:
-        baseline_dataset = _dataset_or_404(baseline_id, db)
-    else:
-        # Compare against the earliest dataset
-        baseline_dataset = (
-            db.query(Dataset)
-            .filter(Dataset.id != dataset_id)
-            .order_by(Dataset.uploaded_at.asc())
-            .first()
-        )
-        if not baseline_dataset:
-            baseline_dataset = current_dataset
-
-    report = await run_in_threadpool(
-        compute_dataset_drift,
-        current_dataset.file_path,
-        baseline_dataset.file_path,
-    )
-    report["dataset_id"] = current_dataset.id
-    report["current_dataset_id"] = current_dataset.id
-    report["current_filename"] = current_dataset.original_filename
-    report["baseline_dataset_id"] = baseline_dataset.id
-    report["baseline_filename"] = baseline_dataset.original_filename
-    return report
-
-
-# ---------------------------------------------------------------------------
 # Dataset detail
 # ---------------------------------------------------------------------------
 
@@ -254,8 +213,18 @@ async def run_validation(
     db.commit()
 
     try:
+        from app.models.custom_rule import CustomRule
+        custom_rules = (
+            db.query(CustomRule)
+            .filter(
+                (CustomRule.dataset_id == dataset_id) | (CustomRule.dataset_id == None),
+                CustomRule.is_active == True,
+            )
+            .all()
+        )
+
         issues = await run_in_threadpool(
-            validate_dataset, dataset.file_path, dataset_id, job.id, profile_dict
+            validate_dataset, dataset.file_path, dataset_id, job.id, profile_dict, custom_rules
         )
 
         for issue in issues:
@@ -586,3 +555,167 @@ async def get_dataset_drift(
     report["baseline_dataset_id"] = baseline_dataset.id
     report["baseline_filename"] = baseline_dataset.original_filename
     return report
+
+
+# ---------------------------------------------------------------------------
+# Data Quality Health Score
+# ---------------------------------------------------------------------------
+
+@router.get("/datasets/{dataset_id}/health-score")
+def get_dataset_health_score(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Computes composite Data Quality Health Score (0-100) and letter grade."""
+    from app.services.health_score_service import calculate_dataset_health_score
+
+    dataset = _dataset_or_404(dataset_id, db)
+    return calculate_dataset_health_score(dataset, db)
+
+
+# ---------------------------------------------------------------------------
+# Data Auto-Remediation & Repair Engine
+# ---------------------------------------------------------------------------
+
+@router.post("/datasets/{dataset_id}/remediate/preview")
+async def preview_dataset_remediation(
+    dataset_id: int,
+    config: Optional[dict] = None,
+    db: Session = Depends(get_db),
+) -> dict:
+    """Simulates remediation without saving changes and returns a preview diff."""
+    import pandas as pd
+    from app.services.remediation_service import execute_remediation
+
+    dataset = _dataset_or_404(dataset_id, db)
+    cfg = config or {}
+
+    df = await run_in_threadpool(pd.read_csv, dataset.file_path, low_memory=False)
+    repaired_df, summary = await run_in_threadpool(execute_remediation, df, cfg)
+
+    # Return summary + sample rows before & after
+    sample_before = df.head(5).fillna("").to_dict(orient="records")
+    sample_after = repaired_df.head(5).fillna("").to_dict(orient="records")
+
+    return {
+        "dataset_id": dataset.id,
+        "filename": dataset.original_filename,
+        "summary": summary,
+        "sample_before": sample_before,
+        "sample_after": sample_after,
+    }
+
+
+@router.post("/datasets/{dataset_id}/remediate")
+async def apply_dataset_remediation(
+    dataset_id: int,
+    config: Optional[dict] = None,
+    save_as_new_dataset: bool = Query(default=True),
+    db: Session = Depends(get_db),
+) -> dict:
+    """Applies remediation, saves the cleaned dataset, and optionally registers it as a clean version."""
+    import os
+    import uuid
+    import pandas as pd
+    from app.services.remediation_service import execute_remediation
+    from app.services.profiling_service import profile_dataset
+
+    dataset = _dataset_or_404(dataset_id, db)
+    cfg = config or {}
+
+    df = await run_in_threadpool(pd.read_csv, dataset.file_path, low_memory=False)
+    repaired_df, summary = await run_in_threadpool(execute_remediation, df, cfg)
+
+    # Generate new repaired file in upload dir
+    clean_filename = f"repaired_{uuid.uuid4().hex[:12]}_{dataset.filename}"
+    clean_path = os.path.join(settings.UPLOAD_DIR, clean_filename)
+
+    await run_in_threadpool(repaired_df.to_csv, clean_path, index=False)
+    clean_size = os.path.getsize(clean_path)
+
+    new_dataset_id = None
+    if save_as_new_dataset:
+        clean_profile = await run_in_threadpool(profile_dataset, clean_path)
+        new_ds = Dataset(
+            filename=clean_filename,
+            original_filename=f"Cleaned_{dataset.original_filename}",
+            file_path=clean_path,
+            file_size=clean_size,
+            row_count=len(repaired_df),
+            column_count=len(repaired_df.columns),
+            status="profiled",
+            profile_json=json.dumps(clean_profile),
+            uploaded_at=datetime.utcnow(),
+            processed_at=datetime.utcnow(),
+        )
+        db.add(new_ds)
+        db.commit()
+        db.refresh(new_ds)
+        new_dataset_id = new_ds.id
+
+    return {
+        "success": True,
+        "original_dataset_id": dataset.id,
+        "new_dataset_id": new_dataset_id,
+        "repaired_filename": clean_filename,
+        "summary": summary,
+        "download_url": f"/api/datasets/{dataset.id}/remediate/download",
+    }
+
+
+@router.get("/datasets/{dataset_id}/remediate/download")
+async def download_remediated_dataset(
+    dataset_id: int,
+    config: Optional[str] = Query(default=None),
+    db: Session = Depends(get_db),
+):
+    """Direct streaming CSV download of the remediated dataset."""
+    import io
+    import pandas as pd
+    from app.services.remediation_service import execute_remediation
+
+    dataset = _dataset_or_404(dataset_id, db)
+    cfg = {}
+    if config:
+        try:
+            cfg = json.loads(config)
+        except Exception:
+            cfg = {}
+
+    df = await run_in_threadpool(pd.read_csv, dataset.file_path, low_memory=False)
+    repaired_df, _ = await run_in_threadpool(execute_remediation, df, cfg)
+
+    stream = io.StringIO()
+    repaired_df.to_csv(stream, index=False)
+    stream.seek(0)
+
+    download_name = f"repaired_{dataset.original_filename}"
+    return StreamingResponse(
+        iter([stream.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{download_name}"'},
+    )
+
+
+# ---------------------------------------------------------------------------
+# Executive PDF / Printable Audit Certificate
+# ---------------------------------------------------------------------------
+
+@router.get("/datasets/{dataset_id}/audit-certificate")
+def get_audit_certificate(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+):
+    """Generates an executive, print/PDF-ready HTML Quality Audit Certificate."""
+    from fastapi.responses import HTMLResponse
+    from app.services.health_score_service import calculate_dataset_health_score
+    from app.services.certificate_service import generate_audit_certificate_html
+
+    dataset = _dataset_or_404(dataset_id, db)
+    health_data = calculate_dataset_health_score(dataset, db)
+    issues = db.query(Issue).filter(Issue.dataset_id == dataset.id).all()
+    anomalies = db.query(AnomalyResult).filter(AnomalyResult.dataset_id == dataset.id).all()
+
+    html_content = generate_audit_certificate_html(dataset, health_data, issues, anomalies)
+    return HTMLResponse(content=html_content, status_code=200)
+
